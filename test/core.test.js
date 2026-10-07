@@ -50,3 +50,27 @@ test("tokenRange covers a whole string, a word or one char, and rejects missing 
   assert.equal(tokenRange(t, 5, 1), null);
   assert.equal(tokenLength(""), 0);
 });
+
+import { EditorState } from "@codemirror/state";
+import { jsltLanguage } from "../src/cm/lang.js";
+import { jsltAssist } from "../src/cm/assist.js";
+
+// what the completion source answers when the user has just typed `doc` (cursor at the end)
+const completeAfterTyping = (doc) => {
+  const files = new Map([["lib.jslt", "def foo(a) $a\ndef bar(a) $a"]]);
+  const state = EditorState.create({ doc, extensions: [jsltLanguage, jsltAssist(() => ({ files }))] });
+  const source = state.languageDataAt("autocomplete", doc.length)[0];
+  return source({ state, pos: doc.length, explicit: false });
+};
+
+test("completion opens right after ':' or '$', before any letter is typed", () => {
+  const afterColon = completeAfterTyping('import "lib.jslt" as c\nlet t = c:');
+  assert.deepEqual(afterColon && afterColon.options.map((o) => o.label).sort(), ["bar", "foo"]);
+  const afterDollar = completeAfterTyping("let x = 1\nlet t = $");
+  assert.ok(afterDollar && afterDollar.options.some((o) => o.label === "x"));
+});
+
+test("completion stays quiet where nothing was typed and no trigger character precedes", () => {
+  assert.equal(completeAfterTyping("let t = "), null);
+  assert.equal(completeAfterTyping("let t = (1 + "), null);
+});

@@ -1,6 +1,6 @@
 {
   "name": "jslt-editor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Embeddable JSLT editor: highlighting, completion, hover docs, formatting and error markers (built on CodeMirror 6)",
   "license": "Apache-2.0",
   "author": "Anton Kraev",

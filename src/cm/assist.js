@@ -9,7 +9,8 @@ export function jsltAssist(getCtx) {
       autocomplete(cx) {
         const line = cx.state.doc.lineAt(cx.pos);
         const r = candidates(line.text.slice(0, cx.pos - line.from), cx.state.doc.toString(), getCtx().files);
-        if (!r || (!cx.explicit && cx.pos - line.from - r.from < 1)) return null;
+        // an empty prefix opens the popup only right after `:` (alias functions) or `$` (variables)
+        if (!r || (!cx.explicit && cx.pos - line.from - r.from < 1 && !/[:$]/.test(line.text[r.from - 1] || ""))) return null;
         return { from: line.from + r.from, options: r.options, validFor: /^[\w-]*$/ };
       },
     }),
