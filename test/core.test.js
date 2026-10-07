@@ -74,3 +74,93 @@ test("completion stays quiet where nothing was typed and no trigger character pr
   assert.equal(completeAfterTyping("let t = "), null);
   assert.equal(completeAfterTyping("let t = (1 + "), null);
 });
+
+import { usableInput } from "../src/core/scan.js";
+import { toDiagnostic } from "../src/cm/lint.js";
+
+// ---- `.` field completion
+const sample = {
+  header: { event_type: ["x"] },
+  message: { booking: { id: 1, "tariff segments": [{ seg: 1 }] }, items: [{ sku: "a", qty: 1 }, { sku: "b", note: "n" }] },
+};
+const complete = (before, upto = before, text = upto, input = sample) => candidates(before, text, new Map(), { input, upto });
+const labels = (r) => r.options.map((o) => o.label);
+
+test("a bare '.' offers the root keys first, then every other key in the input", () => {
+  const l = labels(complete("."));
+  assert.deepEqual(l.slice(0, 2), ["header", "message"]);
+  assert.ok(l.includes("sku") && l.includes("booking"));
+  assert.equal(new Set(l).size, l.length);
+});
+
+test("'.a.b.' walks the path; array elements contribute the keys of their first 20 items", () => {
+  assert.deepEqual(labels(complete(".message.")).slice(0, 2), ["booking", "items"]);
+  assert.deepEqual(labels(complete(".message.items[0].")).slice(0, 2), ["sku", "qty"]);
+  assert.notEqual(labels(complete(".message.items[0]."))[2], "note"); // [0] is one element; "note" only exists on the second
+  assert.deepEqual(labels(complete(".message.items[].")).slice(0, 3), ["sku", "qty", "note"]);
+});
+
+test("'$var.' follows 'let var = <path>'", () => {
+  const doc = "let m = .message\nlet x = $m.";
+  assert.deepEqual(labels(complete("let x = $m.", doc)).slice(0, 2), ["booking", "items"]);
+});
+
+test("inside [for (<path>) ...] a bare '.' is the loop element", () => {
+  const line = "let r = [for (.message.items) .";
+  assert.deepEqual(labels(complete(line)).slice(0, 3), ["sku", "qty", "note"]);
+  const header = "let r = [for (.message.";
+  assert.deepEqual(labels(complete(header)).slice(0, 2), ["booking", "items"]);
+});
+
+test("keys that are not plain words are offered quoted; a typed prefix is kept as the start", () => {
+  const seg = complete(".message.booking.").options.find((o) => o.label === "tariff segments");
+  assert.equal(seg.apply, '"tariff segments"');
+  const r = complete(".message.it");
+  assert.equal(r.from, ".message.".length);
+});
+
+test("an unresolvable context still offers every key; numbers, '..' and strings do not trigger it", () => {
+  assert.ok(labels(complete("let n = size(.).")).includes("sku"));
+  assert.equal(complete("let x = 1."), null);
+  assert.equal(complete("let x = .."), null);
+  assert.equal(complete('let x = "a.'), null);
+});
+
+test("without input there is no '.' completion", () => {
+  assert.equal(complete(".", ".", ".", null), null);
+});
+
+test("usableInput: only a non-empty object or array enables it", () => {
+  assert.equal(usableInput(sample), sample);
+  assert.deepEqual(usableInput([{ a: 1 }]), [{ a: 1 }]);
+  for (const bad of [null, undefined, {}, [], "{\"a\":1}", 3, true]) assert.equal(usableInput(bad), null);
+});
+
+// ---- error placement
+test("'expected … after …' underlines the token before the line the parser failed on", () => {
+  const doc = EditorState.create({ doc: "let a = 1\nlet b = .\nlet c = 2" }).doc;
+  const err = { getLine: () => 3, getColumn: () => 1, getMessageWithoutLocation: () => "Parse error: expected a field name after '.'" };
+  const d = toDiagnostic(err, doc);
+  assert.equal(doc.sliceString(d.from, d.to), ".");
+  const other = { ...err, getMessageWithoutLocation: () => "Parse error: unexpected token 'let'" };
+  assert.equal(doc.sliceString(toDiagnostic(other, doc).from, toDiagnostic(other, doc).to), "let");
+});
+
+test("the editor source opens the popup right after '.' once an input is set, and not after '1.'", () => {
+  const files = new Map();
+  const source = (doc, input) => {
+    const state = EditorState.create({ doc, extensions: [jsltLanguage, jsltAssist(() => ({ files, input }))] });
+    return state.languageDataAt("autocomplete", doc.length)[0]({ state, pos: doc.length, explicit: false });
+  };
+  assert.deepEqual(source("let t = .", sample).options.slice(0, 2).map((o) => o.label), ["header", "message"]);
+  assert.equal(source("let t = .", null), null);
+  assert.equal(source("let t = 1.", sample), null);
+});
+
+test("tokenRange takes the error message: unfinished constructs point at the token above", () => {
+  const text = "let a = 1\n// note\nlet b = .\n\nlet c = 2";
+  const at = (line, col, msg) => { const r = tokenRange(text, line, col, msg); return r && text.slice(r.from, r.to); };
+  assert.equal(at(5, 1, "Parse error: expected a field name after '.'"), ".");
+  assert.equal(at(5, 1, "Parse error: unexpected token"), "let");
+  assert.equal(at(3, 9, "expected a name after '.'"), ".");   // the failing token is on the same line: unchanged rule applies, token at col 9
+});

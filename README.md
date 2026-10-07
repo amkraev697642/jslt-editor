@@ -37,8 +37,13 @@ Without a bundler, one script tag (pin the version and add an `integrity` hash w
 ```
 
 `createEditor` returns `{ view, getText, setText, setLanguage, setReadOnly, setDark, setErrors, setMarks, format, reveal,
-scrollTo, rangeAt, getSelection, newState / setState (one editor, many documents) , focus, destroy }`.
+scrollTo, rangeAt, getSelection, setInput, newState / setState (one editor, many documents) , focus, destroy }`.
 `getFiles: () => Map(name -> text)` lets completion see `import "name" as alias` files.
+
+`editor.setInput(value)` switches on `.` field completion: pass the **parsed** input JSON the transform runs on (never text, and not a
+half-edited state). It returns `true` for a non-empty object or array; `null`, `undefined`, an empty object/array or any other value
+turns the completion off and returns `false`. The editor works out what a `.` refers to: the root, `.a.b.`, `.a[0].`, `$var.` (from
+`let var = <path>`) and the element of an enclosing `[for (<path>) ...]`; keys of that context come first, every other key of the input after them.
 
 ## Entry points
 

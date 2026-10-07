@@ -6,6 +6,7 @@ import { Decoration, keymap } from "@codemirror/view";
 import { json } from "@codemirror/lang-json";
 import { xml } from "@codemirror/lang-xml";
 import { linter, setDiagnostics } from "@codemirror/lint";
+import { usableInput } from "./core/scan.js";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { jsltLanguage, jsltHighlight, jsltAssist, toDiagnostic, jsonSyntaxErrors } from "./cm/index.js";
 import { formatJslt } from "./core/format.js";
@@ -34,8 +35,9 @@ const marksField = StateField.define({
 // setState() swaps it in, the usual CodeMirror pattern for tabs.
 export function createEditor({ parent, doc = "", language = "text", readOnly = false, dark = false, onChange, getFiles = () => new Map(), swallowKeys = [] }) {
   const theme = new Compartment(), lang = new Compartment(), access = new Compartment();
+  let input = null; // the parsed input JSON, for `.` completion (see setInput)
   const modes = {
-    jslt: () => [jsltLanguage, jsltHighlight, jsltAssist(() => ({ files: getFiles() }))],
+    jslt: () => [jsltLanguage, jsltHighlight, jsltAssist(() => ({ files: getFiles(), input }))],
     json: () => [json(), linter(jsonSyntaxErrors)],
     xml: () => xml(),
     text: () => [],
@@ -68,6 +70,9 @@ export function createEditor({ parent, doc = "", language = "text", readOnly = f
       state.dark = on;
       view.dispatch({ effects: theme.reconfigure(on ? oneDark : []) });
     },
+    // The input JSON the transform runs on, already parsed (never text), for `.` completion. Returns whether completion is on:
+    // false (and off) for null, undefined, an empty object/array or anything that is not an object or array.
+    setInput(value) { input = usableInput(value); return input !== null; },
     // errors: JsltException or [{from, to, message, severity?}]; pass null/[] to clear
     setErrors(errors) {
       const list = !errors ? [] : Array.isArray(errors) ? errors : [toDiagnostic(errors, view.state.doc)];
@@ -75,7 +80,8 @@ export function createEditor({ parent, doc = "", language = "text", readOnly = f
     },
     setMarks: (list) => view.dispatch({ effects: marksEffect.of(list) }),
     // 1-based line/column -> {from, to} of the token there
-    rangeAt: (line, col) => tokenRange(view.state.doc.toString(), line, col),
+    // (an "expected … after …" message moves the range to the last token above, where the construct was left unfinished)
+    rangeAt: (line, col, message) => tokenRange(view.state.doc.toString(), line, col, message),
     getSelection: () => ({ from: view.state.selection.main.from, to: view.state.selection.main.to }),
     getScroll: () => view.scrollDOM.scrollTop,
     setScroll: (top) => { view.scrollDOM.scrollTop = top; },
