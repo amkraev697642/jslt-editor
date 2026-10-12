@@ -51,6 +51,25 @@ statements plus one expression) on `input` (the object from `setInput`), or `und
 per distinct program and completion, and only for text that does not resolve statically. `.`-relative text inside a `[for ...]` over a
 resolved element is not evaluated (the header's `let`s are written against the root `.`). `setEvaluator(null)` turns it off.
 
+## What completes
+
+| You type | Offered | Needs |
+|---|---|---|
+| a word | built-in functions (with signature and doc), `def`s of the file, import aliases, keywords, `true` / `false` / `null` | nothing |
+| `alias:` | functions of the imported file, with their parameters | `getFiles` |
+| `$` | the `let` variables and function parameters in the file | nothing |
+| `.` | field names, scoped to what the `.` refers to (below) | `setInput` |
+
+Field completion lists the keys of the resolved object first (with the value's type), then every other key of the input. What a `.` refers to:
+
+- the root, or `.a.b.` / `.a[0].` (first element of an array of objects)
+- `$var.` where `let var = <path>`
+- the element of an enclosing `[for (<path>) ...]`, also nested
+- `$var.` bound to a function call, and call results such as `c:booking(.).`: only with `setEvaluator`
+- anything still unresolved: the root input
+
+Nothing completes inside strings or comments. Hovering a function call shows its signature and doc (built-ins and `def`s of the file).
+
 ## Entry points
 
 | Import | What it is |

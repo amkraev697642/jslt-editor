@@ -112,7 +112,8 @@ function evalPath(text, context, env, depth = 0) {
     if (!c.v) v = walk(context, c.segs);
     else { const rhs = env.lets.get(c.v); v = rhs === undefined ? undefined : walk(evalPath(rhs, context, env, depth + 1), c.segs); }
   }
-  return v !== undefined ? v : evaluated(text.trim(), context, env);
+  // only the outermost text is evaluated: a let's right-hand side is blanked (strings) and its `$var` is defined by the header anyway
+  return v !== undefined || depth ? v : evaluated(text.trim(), context, env);
 }
 
 // What a bare `.` means at the end of `upto`: the element of the innermost enclosing [for (path) ...] / {for (path) ...}, else the input.
@@ -123,7 +124,7 @@ function contextAt(upto, input, env) {
     if (c === "(" || c === "[" || c === "{") stack.push({ at: i, header: c === "(" && /[\[{]\s*for\s*$/.test(code.slice(0, i)), loop: null });
     else if (c === ")" || c === "]" || c === "}") {
       const f = stack.pop();
-      if (f && f.header && stack.length) stack[stack.length - 1].loop = code.slice(f.at + 1, i);
+      if (f && f.header && stack.length) stack[stack.length - 1].loop = upto.slice(f.at + 1, i); // original text: strings are blanked in `code`
     }
   }
   let context = input;

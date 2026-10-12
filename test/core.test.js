@@ -137,6 +137,14 @@ test("a call result completes from the evaluator; one that throws or returns not
   assert.ok(labels(withEval(doc, () => undefined)).includes("sku"));
 });
 
+test("a let bound to a literal with strings is evaluated through its $var, not its blanked text", () => {
+  const seen = [];
+  const doc = 'let pp = {"zz": 1}\n$pp.';
+  const r = withEval(doc, (program) => { seen.push(program); return { zz: 1 }; });
+  assert.equal(labels(r)[0], "zz");
+  assert.ok(seen.every((p) => p.includes('{"zz": 1}')));
+});
+
 test("the header leaves out the statement being typed, so a half-typed let is never evaluated", () => {
   const seen = [];
   withEval("let a = .message\nlet b = f($a).", (program) => { seen.push(program); });
