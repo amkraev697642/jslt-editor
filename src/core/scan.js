@@ -57,17 +57,66 @@ function walk(value, segs) {
   return value;
 }
 
+// Everything before the body: the leading import/let/def statements, minus the one the cursor is in (it is unfinished).
+// ponytail: a statement ends at the next depth-0 line that starts with let/def/import; a multi-line let/def body without brackets ends the header early.
+function headerOf(upto) {
+  const code = blank(upto), lines = code.split("\n");
+  let depth = 0, at = 0, cut = null, last = null;
+  for (const line of lines) {
+    if (depth === 0 && line.trim()) {
+      if (/^(let|def|import)\b/.test(line)) last = at;
+      else if (/^\S/.test(line)) { cut = at; break; }
+    }
+    for (const ch of line) depth += "([{".includes(ch) ? 1 : ")]}".includes(ch) ? -1 : 0;
+    at += line.length + 1;
+  }
+  const end = cut ?? last; // no body yet: the last statement is the one being typed
+  return end == null ? "" : upto.slice(0, end);
+}
+
+// The path or call expression that ends `head`: `$b.items[0]`, `c:booking(.).passengers`, `.a.b`.
+function tailExpr(head) {
+  let i = head.length;
+  while (i > 0) {
+    const c = head[i - 1];
+    if (c === ")" || c === "]") {
+      let d = 0, j = i;
+      for (; j > 0; j--) { const k = head[j - 1]; if (")]".includes(k)) d++; else if ("([".includes(k) && --d === 0) break; }
+      if (j === 0) return null;
+      i = j - 1;
+    } else if (/[\w$:.]/.test(c) || (c === "-" && /\w/.test(head[i - 2] || "") && /\w/.test(head[i] || ""))) i--;
+    else break;
+  }
+  return head.slice(i).trim() || null;
+}
+
+// env = {lets, input, header, evaluate}. evaluate(program, input) -> value|undefined is the host's JSLT engine (setEvaluator).
+function evaluated(text, context, env) {
+  if (!env.evaluate || !text) return undefined;
+  // the header's lets were written against the root `.`: a `.`-relative text inside a loop cannot be probed
+  if (context !== env.input && !/^\s*\$/.test(text)) return undefined;
+  const program = env.header + "\n" + text;
+  if (!env.memo.has(program)) {
+    let v;
+    try { v = env.evaluate(program, env.input); } catch { v = undefined; }
+    env.memo.set(program, v === null ? undefined : v);
+  }
+  return env.memo.get(program);
+}
+
 // value of a whole path text such as `.items`, `$b.items[0]`, `.` (context = what a bare `.` means there)
-function evalPath(text, context, lets, depth = 0) {
+function evalPath(text, context, env, depth = 0) {
   const c = chain(text.trim());
-  if (c.rest.trim() || depth > 5) return undefined;
-  if (!c.v) return walk(context, c.segs);
-  const rhs = lets.get(c.v);
-  return rhs === undefined ? undefined : walk(evalPath(rhs, context, lets, depth + 1), c.segs);
+  let v;
+  if (!c.rest.trim() && depth <= 5) {
+    if (!c.v) v = walk(context, c.segs);
+    else { const rhs = env.lets.get(c.v); v = rhs === undefined ? undefined : walk(evalPath(rhs, context, env, depth + 1), c.segs); }
+  }
+  return v !== undefined ? v : evaluated(text.trim(), context, env);
 }
 
 // What a bare `.` means at the end of `upto`: the element of the innermost enclosing [for (path) ...] / {for (path) ...}, else the input.
-function contextAt(upto, input, lets) {
+function contextAt(upto, input, env) {
   const code = blank(upto), stack = [];
   for (let i = 0; i < code.length; i++) {
     const c = code[i];
@@ -80,7 +129,7 @@ function contextAt(upto, input, lets) {
   let context = input;
   for (const f of stack) {
     if (f.loop === null) continue;
-    const v = evalPath(f.loop, context, lets);
+    const v = evalPath(f.loop, context, env);
     // a loop visits every element: the context is their merge; an object loops over {key, value} entries
     context = Array.isArray(v) ? Object.assign({}, ...v.slice(0, 20).filter((e) => e && typeof e === "object" && !Array.isArray(e))) : v && typeof v === "object" ? { key: "", value: "" } : undefined;
   }
@@ -104,16 +153,18 @@ const fieldOption = (key, value, boost) => ({
 });
 
 // dotAt = index of the `.` being completed in `before`.
-function fieldCandidates(before, dotAt, { input, upto }, lets) {
+function fieldCandidates(before, dotAt, { input, upto, evaluate }, lets) {
   const head = before.slice(0, dotAt);
   if (!input || /\.$/.test(head) || /(^|[^\w$-])\d+$/.test(head)) return null; // `..` and `1.` are not field access
-  const context = contextAt(upto ?? before, input, lets);
+  const env = { lets, input, evaluate, header: evaluate ? headerOf(upto ?? before) : "", memo: new Map() };
+  const context = contextAt(upto ?? before, input, env);
   const c = chain(head);
   let base;
-  if (c.v) base = evalPath("$" + c.v, context, lets);
+  if (c.v) base = evalPath("$" + c.v, context, env);
   else if (c.segs.length ? /[\w)\]"'-]$/.test(c.rest) || c.segs[0][0] !== "." : /[\w)\]"'-]$/.test(c.rest)) base = undefined;
-  else base = context;
-  const scoped = base === undefined ? undefined : walk(base, c.segs);
+  else base = context ?? input; // context is undefined when the loop's list can't be followed (e.g. [for (f(.x))]): guess the root
+  let scoped = base === undefined ? undefined : walk(base, c.segs);
+  if (scoped === undefined) scoped = evaluated(tailExpr(head), context, env); // e.g. c:booking(.).passengers.
   const options = [], seen = new Set();
   const valueOf = (k) => (Array.isArray(scoped) ? scoped.find((e) => e && typeof e === "object" && k in e) : scoped)?.[k];
   const add = (k, boost) => { if (!seen.has(k) && options.length < 500) { seen.add(k); options.push(fieldOption(k, boost ? valueOf(k) : undefined, boost)); } };

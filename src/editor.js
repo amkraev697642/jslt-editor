@@ -36,8 +36,9 @@ const marksField = StateField.define({
 export function createEditor({ parent, doc = "", language = "text", readOnly = false, dark = false, onChange, getFiles = () => new Map(), swallowKeys = [] }) {
   const theme = new Compartment(), lang = new Compartment(), access = new Compartment();
   let input = null; // the parsed input JSON, for `.` completion (see setInput)
+  let evaluate = null; // host JSLT engine, for completion past function calls (see setEvaluator)
   const modes = {
-    jslt: () => [jsltLanguage, jsltHighlight, jsltAssist(() => ({ files: getFiles(), input }))],
+    jslt: () => [jsltLanguage, jsltHighlight, jsltAssist(() => ({ files: getFiles(), input, evaluate }))],
     json: () => [json(), linter(jsonSyntaxErrors)],
     xml: () => xml(),
     text: () => [],
@@ -73,6 +74,9 @@ export function createEditor({ parent, doc = "", language = "text", readOnly = f
     // The input JSON the transform runs on, already parsed (never text), for `.` completion. Returns whether completion is on:
     // false (and off) for null, undefined, an empty object/array or anything that is not an object or array.
     setInput(value) { input = usableInput(value); return input !== null; },
+    // fn(program, input) -> the plain JS value of running `program` (the file's leading import/let/def statements plus one expression)
+    // on `input`, or undefined; it may throw. Lets `.` completion follow `$var`s and calls such as `c:booking(.).`. null turns it off.
+    setEvaluator(fn) { evaluate = typeof fn === "function" ? fn : null; },
     // errors: JsltException or [{from, to, message, severity?}]; pass null/[] to clear
     setErrors(errors) {
       const list = !errors ? [] : Array.isArray(errors) ? errors : [toDiagnostic(errors, view.state.doc)];

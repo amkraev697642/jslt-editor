@@ -45,6 +45,12 @@ half-edited state). It returns `true` for a non-empty object or array; `null`, `
 turns the completion off and returns `false`. The editor works out what a `.` refers to: the root, `.a.b.`, `.a[0].`, `$var.` (from
 `let var = <path>`) and the element of an enclosing `[for (<path>) ...]`; keys of that context come first, every other key of the input after them.
 
+`editor.setEvaluator(fn)` lets completion follow what keys alone cannot: `$var`s bound to function calls and call results such as
+`c:booking(.).`. `fn(program, input)` must return the plain JS value of running `program` (the file's leading `import` / `let` / `def`
+statements plus one expression) on `input` (the object from `setInput`), or `undefined`; it may throw. It runs synchronously, at most once
+per distinct program and completion, and only for text that does not resolve statically. `.`-relative text inside a `[for ...]` over a
+resolved element is not evaluated (the header's `let`s are written against the root `.`). `setEvaluator(null)` turns it off.
+
 ## Entry points
 
 | Import | What it is |

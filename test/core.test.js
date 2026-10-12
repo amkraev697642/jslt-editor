@@ -81,7 +81,7 @@ import { toDiagnostic } from "../src/cm/lint.js";
 // ---- `.` field completion
 const sample = {
   header: { event_type: ["x"] },
-  message: { booking: { id: 1, "tariff segments": [{ seg: 1 }] }, items: [{ sku: "a", qty: 1 }, { sku: "b", note: "n" }] },
+  message: { booking: { id: 1, "price tiers": [{ tier: 1 }] }, items: [{ sku: "a", qty: 1 }, { sku: "b", note: "n" }] },
 };
 const complete = (before, upto = before, text = upto, input = sample) => candidates(before, text, new Map(), { input, upto });
 const labels = (r) => r.options.map((o) => o.label);
@@ -112,9 +112,46 @@ test("inside [for (<path>) ...] a bare '.' is the loop element", () => {
   assert.deepEqual(labels(complete(header)).slice(0, 2), ["booking", "items"]);
 });
 
+test("inside a loop over an unresolvable path, '.a.' still walks from the root input", () => {
+  const doc = "let l = f(.message)\n[for ($l) let s = .x + .message.";
+  assert.deepEqual(labels(complete(doc.split("\n")[1], doc)).slice(0, 2), ["booking", "items"]);
+  assert.deepEqual(labels(complete("[for ($l) let s = .", "let l = f(.message)\n[for ($l) let s = .")).slice(0, 2), ["header", "message"]);
+});
+
+// ---- evaluator-backed completion: what static resolution cannot follow (calls, `$var`s bound to calls) is asked of the host engine
+const withEval = (doc, evaluate) => candidates(doc.slice(doc.lastIndexOf("\n") + 1), doc, new Map(), { input: sample, upto: doc, evaluate });
+
+test("a $var bound to a call completes from the evaluated value, also as the element of a loop", () => {
+  const seen = [];
+  const evaluate = (program) => { seen.push(program); return /\$lifts\s*$/.test(program) ? [{ seq: 1, leg: "a" }, { seq: 2, note: "n" }] : undefined; };
+  const doc = "let lifts = f(.message)\n[for ($lifts) let s = .";
+  assert.deepEqual(labels(withEval(doc, evaluate)).slice(0, 3), ["seq", "leg", "note"]);
+  assert.deepEqual(labels(withEval("let lifts = f(.message)\nlet z = $lifts[0].", evaluate)).slice(0, 2), ["seq", "leg"]);
+  assert.ok(seen.every((p) => p.startsWith("let lifts = f(.message)"))); // the header is the statements before the one being typed
+});
+
+test("a call result completes from the evaluator; one that throws or returns nothing falls back", () => {
+  const doc = '{ "x": f(.message).';
+  assert.deepEqual(labels(withEval(doc, () => ({ alpha: 1, beta: 2 }))).slice(0, 2), ["alpha", "beta"]);
+  assert.ok(labels(withEval(doc, () => { throw new Error("boom"); })).includes("sku"));
+  assert.ok(labels(withEval(doc, () => undefined)).includes("sku"));
+});
+
+test("the header leaves out the statement being typed, so a half-typed let is never evaluated", () => {
+  const seen = [];
+  withEval("let a = .message\nlet b = f($a).", (program) => { seen.push(program); });
+  assert.ok(seen.length && seen.every((p) => !p.includes("let b")));
+});
+
+test("a `.`-relative text inside a loop over a resolved element is not evaluated", () => {
+  let calls = 0;
+  withEval("[for (.message.items) f(.sku).", () => { calls++; });
+  assert.equal(calls, 0);
+});
+
 test("keys that are not plain words are offered quoted; a typed prefix is kept as the start", () => {
-  const seg = complete(".message.booking.").options.find((o) => o.label === "tariff segments");
-  assert.equal(seg.apply, '"tariff segments"');
+  const seg = complete(".message.booking.").options.find((o) => o.label === "price tiers");
+  assert.equal(seg.apply, '"price tiers"');
   const r = complete(".message.it");
   assert.equal(r.from, ".message.".length);
 });
