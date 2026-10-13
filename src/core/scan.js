@@ -170,7 +170,7 @@ function fieldCandidates(before, dotAt, { input, upto, evaluate }, lets) {
   const valueOf = (k) => (Array.isArray(scoped) ? scoped.find((e) => e && typeof e === "object" && k in e) : scoped)?.[k];
   const add = (k, boost) => { if (!seen.has(k) && options.length < 500) { seen.add(k); options.push(fieldOption(k, boost ? valueOf(k) : undefined, boost)); } };
   keysOf(scoped).forEach((k) => add(k, 10));
-  allKeys(input).forEach((k) => add(k, 0));
+  if (!options.length) allKeys(input).forEach((k) => add(k, 0)); // nothing resolved: every key of the input beats an empty popup
   return options.length ? { from: dotAt + 1, options } : null;
 }
 

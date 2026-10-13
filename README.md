@@ -43,7 +43,7 @@ scrollTo, rangeAt, getSelection, setInput, newState / setState (one editor, many
 `editor.setInput(value)` switches on `.` field completion: pass the **parsed** input JSON the transform runs on (never text, and not a
 half-edited state). It returns `true` for a non-empty object or array; `null`, `undefined`, an empty object/array or any other value
 turns the completion off and returns `false`. The editor works out what a `.` refers to: the root, `.a.b.`, `.a[0].`, `$var.` (from
-`let var = <path>`) and the element of an enclosing `[for (<path>) ...]`; keys of that context come first, every other key of the input after them.
+`let var = <path>`) and the element of an enclosing `[for (<path>) ...]`; only the keys of that context are offered.
 
 `editor.setEvaluator(fn)` lets completion follow what keys alone cannot: `$var`s bound to function calls and call results such as
 `c:booking(.).`. `fn(program, input)` must return the plain JS value of running `program` (the file's leading `import` / `let` / `def`
@@ -60,13 +60,13 @@ resolved element is not evaluated (the header's `let`s are written against the r
 | `$` | the `let` variables and function parameters in the file | nothing |
 | `.` | field names, scoped to what the `.` refers to (below) | `setInput` |
 
-Field completion lists the keys of the resolved object first (with the value's type), then every other key of the input. What a `.` refers to:
+Field completion lists the keys of the resolved object (with the value's type); a bare `.` gives the first level of the input. What a `.` refers to:
 
 - the root, or `.a.b.` / `.a[0].` (first element of an array of objects)
 - `$var.` where `let var = <path>`
 - the element of an enclosing `[for (<path>) ...]`, also nested
 - `$var.` bound to a function call, and call results such as `c:booking(.).`: only with `setEvaluator`
-- anything still unresolved: the root input
+- anything unresolved: every key found anywhere in the input, so the popup is not empty
 
 Nothing completes inside strings or comments. Hovering a function call shows its signature and doc (built-ins and `def`s of the file).
 

@@ -86,10 +86,13 @@ const sample = {
 const complete = (before, upto = before, text = upto, input = sample) => candidates(before, text, new Map(), { input, upto });
 const labels = (r) => r.options.map((o) => o.label);
 
-test("a bare '.' offers the root keys first, then every other key in the input", () => {
-  const l = labels(complete("."));
-  assert.deepEqual(l.slice(0, 2), ["header", "message"]);
-  assert.ok(l.includes("sku") && l.includes("booking"));
+test("a bare '.' offers the first-level keys of the input only", () => {
+  assert.deepEqual(labels(complete(".")), ["header", "message"]);
+});
+
+test("a scope that resolves to nothing falls back to every key in the input, without repeats", () => {
+  const l = labels(complete(".nope."));
+  assert.ok(l.includes("header") && l.includes("sku") && l.includes("booking"));
   assert.equal(new Set(l).size, l.length);
 });
 
