@@ -1,6 +1,6 @@
 {
   "name": "jslt-editor",
-  "version": "0.3.5",
+  "version": "0.5.0",
   "description": "Embeddable JSLT editor: highlighting, completion, hover docs, formatting and error markers (built on CodeMirror 6)",
   "license": "Apache-2.0",
   "author": "Anton Kraev",
@@ -42,9 +42,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "node scripts/jslt-text.mjs && node scripts/build.mjs",
+    "pretest": "node scripts/jslt-text.mjs",
     "test": "node --test",
-    "prepublishOnly": "node scripts/build.mjs"
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@codemirror/language": "^6.0.0",
@@ -72,6 +73,7 @@
     "@codemirror/view": "6.43.13",
     "@lezer/highlight": "1.2.5",
     "codemirror": "6.0.2",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "jslt-js": "0.5.0"
   }
 }

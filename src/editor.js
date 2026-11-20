@@ -11,22 +11,38 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import { jsltLanguage, jsltHighlight, jsltAssist, toDiagnostic, jsonSyntaxErrors } from "./cm/index.js";
 import { formatJslt } from "./core/format.js";
 import { tokenRange } from "./core/errors.js";
+import { coveragePoints, coverageRanges, coverageSummary } from "./core/coverage.js";
 
-export { formatJslt, toDiagnostic, tokenRange };
+export { formatJslt, toDiagnostic, tokenRange, coveragePoints, coverageRanges, coverageSummary };
 export { FUNCTION_DOCS } from "./core/docs.js";
 
+// A layer of mark decorations replaced as a whole by its effect and mapped through edits; decorate(range) -> Decoration.mark
+const markLayer = (decorate) => {
+  const effect = StateEffect.define();
+  const field = StateField.define({
+    create: () => Decoration.none,
+    update(set, tr) {
+      set = set.map(tr.changes);
+      for (const e of tr.effects) if (e.is(effect)) set = Decoration.set(e.value.map((r) => decorate(r).range(r.from, r.to)), true);
+      return set;
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  });
+  return { effect, field };
+};
+
 // Highlighted ranges (search hits and the like): setMarks([{from, to, cls?}]), cls defaults to "find-hit".
-const marksEffect = StateEffect.define();
-const marksField = StateField.define({
-  create: () => Decoration.none,
-  update(set, tr) {
-    set = set.map(tr.changes);
-    for (const e of tr.effects) {
-      if (e.is(marksEffect)) set = Decoration.set(e.value.map((r) => Decoration.mark({ class: r.cls || "find-hit" }).range(r.from, r.to)), true);
-    }
-    return set;
-  },
-  provide: (f) => EditorView.decorations.from(f),
+const { effect: marksEffect, field: marksField } = markLayer((r) => Decoration.mark({ class: r.cls || "find-hit" }));
+
+// Coverage ranges from coverageRanges(): setCoverage(points); a layer of its own so it and setMarks do not replace each other.
+const { effect: coverageEffect, field: coverageField } = markLayer((r) => Decoration.mark({ class: r.cls, attributes: { title: r.title } }));
+const coverageTheme = EditorView.baseTheme({
+  ".cov-hit": { backgroundColor: "#c8e6c9" },
+  ".cov-miss": { backgroundColor: "#ffcdd2" },
+  ".cov-part": { backgroundColor: "#fff59d" },
+  "&dark .cov-hit": { backgroundColor: "#1b5e20" },
+  "&dark .cov-miss": { backgroundColor: "#8e2420" },
+  "&dark .cov-part": { backgroundColor: "#7a6b00" },
 });
 
 // language: "jslt" | "json" | "xml" | "text". getFiles() -> Map(name -> text) for import completion.
@@ -50,6 +66,8 @@ export function createEditor({ parent, doc = "", language = "text", readOnly = f
       Prec.highest(keymap.of(swallowKeys.map((key) => ({ key, run: () => true })))),
       basicSetup,
       marksField,
+      coverageField,
+      coverageTheme,
       theme.of(state.dark ? oneDark : []),
       lang.of(modes[o.language || "text"]()),
       access.of(accessExt(!!o.readOnly)),
@@ -83,6 +101,12 @@ export function createEditor({ parent, doc = "", language = "text", readOnly = f
       view.dispatch(setDiagnostics(view.state, list.map((d) => ({ severity: "error", ...d }))));
     },
     setMarks: (list) => view.dispatch({ effects: marksEffect.of(list) }),
+    // a coverage dump or points (see coveragePoints) of the text now in the editor, of the dump's source when given -> green/yellow/red ranges with a hover summary; null clears. Returns the summary line.
+    setCoverage(coverage, source) {
+      const points = coverage ? coveragePoints(coverage, source) : null;
+      view.dispatch({ effects: coverageEffect.of(points ? coverageRanges(view.state.doc.toString(), points, source) : []) });
+      return points ? coverageSummary(points) : "";
+    },
     // 1-based line/column -> {from, to} of the token there
     // (an "expected … after …" message moves the range to the last token above, where the construct was left unfinished)
     rangeAt: (line, col, message) => tokenRange(view.state.doc.toString(), line, col, message),

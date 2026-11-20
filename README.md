@@ -36,7 +36,7 @@ Without a bundler, one script tag (pin the version and add an `integrity` hash w
 </script>
 ```
 
-`createEditor` returns `{ view, getText, setText, setLanguage, setReadOnly, setDark, setErrors, setMarks, format, reveal,
+`createEditor` returns `{ view, getText, setText, setLanguage, setReadOnly, setDark, setErrors, setMarks, setCoverage, format, reveal,
 scrollTo, rangeAt, getSelection, setInput, newState / setState (one editor, many documents) , focus, destroy }`.
 `getFiles: () => Map(name -> text)` lets completion see `import "name" as alias` files.
 
@@ -50,6 +50,33 @@ turns the completion off and returns `false`. The editor works out what a `.` re
 statements plus one expression) on `input` (the object from `setInput`), or `undefined`; it may throw. It runs synchronously, at most once
 per distinct program and completion, and only for text that does not resolve statically. `.`-relative text inside a `[for ...]` over a
 resolved element is not evaluated (the header's `let`s are written against the root `.`). `setEvaluator(null)` turns it off.
+
+## Coverage
+
+`editor.setCoverage(coverage, source?)` paints which parts of the text ran. `coverage` is the dump that `Coverage.toJson()` of the
+[jslt](https://github.com/schibsted/jslt) Java library or of [jslt-js](https://www.npmjs.com/package/jslt-js) produces (parsed), or just its
+`points`. Each point is `{ source, line, column, endLine, endColumn, kind, outcome, hit }`: lines and columns are 1-based, the end is
+inclusive, and `outcome` is `true` or `false` for the two outcomes of a condition (the test of an `if`, a `for` filter, the left of
+`and` / `or`) and `null` for an expression. A dump covers a root and its imports, so pass the `source` whose text is in the editor.
+
+```js
+const dump = JSON.parse(coverageJson);
+const summary = editor.setCoverage(dump, "order.jslt"); // "45 of 55 positions, 3 of 6 branch outcomes covered"
+editor.setCoverage(null);                               // clear
+```
+
+Green (`cov-hit`) ran, red (`cov-miss`) never ran, yellow (`cov-part`) is a condition that ran only one way. Ranges nest like the
+expressions do, and hovering one shows how much of it was covered and what was missed ("2 of 3 positions, 1 of 2 branch outcomes
+covered; missed 1:16 LiteralExpression"). The colours are classes you can restyle, with a light and a dark default. Coverage is a layer of
+its own, so it does not replace `setMarks`. It follows edits, but is not recomputed: pass new points after a run.
+
+The ranges come from `coverage-ranges.jslt`, an example in plain JSLT that ships with [jslt-js](https://www.npmjs.com/package/jslt-js) and is
+used unchanged by the Java library, so every tool shows a dump the same way. jslt-js is bundled into the editor to run it, which adds about
+80 KB to the standalone build; `jslt-editor/codemirror` does not include it.
+
+For an imported file, open its text in the editor (`newState` / `setState`) and pass that file's name as `source`, so a root and its
+imports are one document each; `dump.imports` says which file imports which. `coveragePoints(coverage, source)`, `coverageRanges(text,
+points)` and `coverageSummary(points)` (from `jslt-editor/core`) do the same without an editor.
 
 ## What completes
 
@@ -77,7 +104,7 @@ Nothing completes inside strings or comments. Hovering a function call shows its
 | `jslt-editor` | The ready-made editor above (ESM, CodeMirror bundled in). |
 | `jslt-editor/standalone` | The same editor as one script that sets `JsltEditor`. |
 | `jslt-editor/codemirror` | Only the CodeMirror extensions (`jsltLanguage`, `jsltHighlight`, `jsltAssist`, `toDiagnostic`, `jsonSyntaxErrors`) for apps that already use CodeMirror; `@codemirror/language`, `@codemirror/view` and `@lezer/highlight` are peer dependencies. |
-| `jslt-editor/core` | Framework-free logic (function docs, `scan`, `candidates`, `wordInfo`, `formatJslt`, `tokenRange`), usable in Node. |
+| `jslt-editor/core` | Framework-free logic (function docs, `scan`, `candidates`, `wordInfo`, `formatJslt`, `tokenRange`, `coverageRanges`, `coverageSummary`), usable in Node. |
 
 ```js
 import { EditorView, basicSetup } from "codemirror";

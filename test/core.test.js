@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { scan, candidates, wordInfo } from "../src/core/scan.js";
 import { formatJslt } from "../src/core/format.js";
+import { coveragePoints, coverageRanges, coverageSummary } from "../src/core/coverage.js";
 
 test("scan finds lets, defs with params and imports; ignores strings and comments", () => {
   const s = scan('import "lib.jslt" as lib\nlet a = 1\n// let hidden = 2\ndef f(x, y) $x\n"let nope = 3"');
@@ -211,4 +212,38 @@ test("tokenRange takes the error message: unfinished constructs point at the tok
   assert.equal(at(5, 1, "Parse error: expected a field name after '.'"), ".");
   assert.equal(at(5, 1, "Parse error: unexpected token"), "let");
   assert.equal(at(3, 9, "expected a name after '.'"), ".");   // the failing token is on the same line: unchanged rule applies, token at col 9
+});
+
+test("coverage: nested ranges coloured by what ran, and a summary", () => {
+  const text = "if (.a) 1 else 2";
+  const pt = (column, endColumn, kind, hit, outcome = null) => ({ line: 1, column, endLine: 1, endColumn, kind, outcome, hit });
+  const points = [pt(1, 16, "IfExpression", true), pt(4, 7, "if", true, true), pt(4, 7, "if", false, false), pt(9, 9, "LiteralExpression", true), pt(16, 16, "LiteralExpression", false)];
+
+  const ranges = coverageRanges(text, points);
+  assert.deepEqual(ranges.map((r) => [r.from, r.to, r.cls]), [[0, 16, "cov-hit"], [3, 7, "cov-part"], [8, 9, "cov-hit"], [15, 16, "cov-miss"]]);
+  assert.match(ranges[0].title, /^IfExpression: 2 of 3 positions, 1 of 2 branch outcomes covered; missed 1:4 if=false, 1:16 LiteralExpression$/);
+  assert.equal(coverageSummary(points), "2 of 3 positions, 1 of 2 branch outcomes covered");
+});
+
+test("coverage: a dump gives the points of one source, a plain array is taken as is", () => {
+  const a = { source: "a.jslt", line: 1, column: 1, endLine: 1, endColumn: 1, kind: "X", hit: true };
+  const b = { ...a, source: "b.jslt" };
+  const dump = { sources: {}, imports: { "a.jslt": ["b.jslt"] }, points: [a, b] };
+  assert.deepEqual(coveragePoints(dump, "b.jslt"), [b]);
+  assert.deepEqual(coveragePoints(dump), [a, b]);
+  assert.deepEqual(coveragePoints([a, b]), [a, b]);
+});
+
+test("coverage: one source of a dump is painted, ranges that start together come outermost first", () => {
+  const point = (source, endColumn, kind, hit) => ({ source, line: 1, column: 1, endLine: 1, endColumn, kind, outcome: null, hit });
+  const dump = { points: [point("a.jslt", 2, "Inner", false), point("a.jslt", 5, "Outer", true), point("b.jslt", 5, "Other", true)] };
+
+  const ranges = coverageRanges("abcde", coveragePoints(dump, "a.jslt"), "a.jslt");
+  assert.deepEqual(ranges.map((r) => [r.from, r.to, r.cls]), [[0, 5, "cov-hit"], [0, 2, "cov-miss"]]);
+  assert.deepEqual(coverageRanges("abcde", dump.points, "b.jslt").map((r) => r.cls), ["cov-hit"]);
+  assert.deepEqual(coverageRanges("abcde", dump.points, "c.jslt"), []);
+});
+
+test("coverage: points from another text are ignored", () => {
+  assert.deepEqual(coverageRanges("1", [{ line: 3, column: 1, endLine: 3, endColumn: 4, kind: "X", hit: true }]), []);
 });
